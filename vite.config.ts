@@ -12,4 +12,5 @@ export default defineConfig({
       external: ["onnxruntime-web"],
     },
   },
+  base: "",
 });

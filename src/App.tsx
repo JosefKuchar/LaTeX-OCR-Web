@@ -2,7 +2,7 @@ import { Component, createEffect, createSignal, onMount } from "solid-js";
 import katex from "katex";
 import "jimp/browser/lib/jimp";
 const { Jimp } = window as typeof window & { Jimp: any };
-import tokenizer from "./models/tokenizer.json";
+import tokenizer from "./tokenizer.json";
 import config from "./config";
 import { createDropzone } from "@solid-primitives/upload";
 
@@ -61,6 +61,8 @@ const App: Component = () => {
   const [predicted, setPredicted] = createSignal("");
   const [preditecRender, setPredictedRender] = createSignal("");
 
+  const fileInput = <input type="file" class="hidden" />;
+
   const { setRef: dropzoneRef, files: droppedFiles } = createDropzone({
     onDrop: async (files: any) => {
       const reader = new FileReader();
@@ -92,15 +94,10 @@ const App: Component = () => {
 
   const predictImg = async (imageData: ArrayBuffer) => {
     const resizerSession = await ort.InferenceSession.create(
-      "./src/models/image_resizer.onnx"
+      "./image_resizer.onnx"
     );
-
-    const encSession = await ort.InferenceSession.create(
-      "./src/models/encoder.onnx"
-    );
-    const decSession = await ort.InferenceSession.create(
-      "./src/models/decoder.onnx"
-    );
+    const encSession = await ort.InferenceSession.create("./encoder.onnx");
+    const decSession = await ort.InferenceSession.create("./decoder.onnx");
     // const canvas = document.createElement("canvas") as HTMLCanvasElement;
     // canvas.width = 250;
     // canvas.height = 122;
@@ -170,16 +167,48 @@ const App: Component = () => {
   };
 
   return (
-    <>
+    <div class="px-2 container mx-auto bg-slate-900 text-white">
+      <div class="font-semibold text-3xl pt-5">LaTeX OCR Web</div>
+      <div class="mb-2">
+        <div>
+          Made with 💖 by{" "}
+          <a class="underline" href="https://josefkuchar.com">
+            Josef Kuchař
+          </a>
+          ,{" "}
+          <a
+            class="underline"
+            href="https://github.com/JosefKuchar/LaTeX-OCR-Web"
+          >
+            github.com/JosefKuchar/LaTeX-OCR-Web
+          </a>
+        </div>
+        <div>
+          Credits:{" "}
+          <a
+            class="underline"
+            href="https://github.com/lukas-blecher/LaTeX-OCR/"
+          >
+            github.com/lukas-blecher/LaTeX-OCR
+          </a>
+          ,
+          <a class="underline" href="https://github.com/RapidAI/RapidLatexOCR/">
+            github.com/RapidAI/RapidLatexOCR
+          </a>
+        </div>
+        <div>⚠️ Work in progress</div>
+      </div>
       <div
         ref={dropzoneRef}
-        style={{ width: "100px", height: "100px", background: "red" }}
+        class="border w-full h-20 p-2 text-center cursor-pointer hover:bg-slate-700"
+        onClick={() => (fileInput as any).click()}
       >
-        Dropzone
+        Drop image here (or click to select)
       </div>
+      {fileInput}
       <div>{predicted()}</div>
       <div innerHTML={preditecRender()} />
-    </>
+    </div>
   );
 };
 
