@@ -2,10 +2,6 @@ import { Component, createEffect, createSignal, onMount } from "solid-js";
 import katex from "katex";
 import "jimp/browser/lib/jimp";
 const { Jimp } = window as typeof window & { Jimp: any };
-
-// import math from "mathjs";
-// import {} from "ndarray";
-
 import tokenizer from "./models/tokenizer.json";
 import config from "./config";
 import { createDropzone } from "@solid-primitives/upload";
@@ -13,10 +9,7 @@ import { createDropzone } from "@solid-primitives/upload";
 const to_gray = (data: Uint8ClampedArray) => {
   const new_data = new Uint8ClampedArray(data.length / 4);
   for (let i = 0; i < data.length; i += 4) {
-    new_data[i / 4] =
-      //0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-
-      new_data[i / 4] = (data[i] + data[i + 1] + data[i + 2]) / 3;
+    new_data[i / 4] = (data[i] + data[i + 1] + data[i + 2]) / 3;
   }
   return new_data;
 };
@@ -32,6 +25,7 @@ const normalize = (data: Uint8ClampedArray) => {
     }
   }
 
+  //FIXME: Calculate mean and std
   const mean = 0.7931;
   const std = 0.1738;
 
@@ -79,7 +73,24 @@ const App: Component = () => {
     },
   });
 
-  const predictImg = async (imageData: Uint8Array) => {
+  document.onpaste = function (event) {
+    var items = (
+      event.clipboardData || (event as any).originalEvent.clipboardData
+    ).items;
+    for (const index in items) {
+      var item = items[index];
+      if (item.kind === "file") {
+        var blob = item.getAsFile();
+        var reader = new FileReader();
+        reader.onload = function (event) {
+          predictImg(event.target?.result as any);
+        };
+        reader.readAsArrayBuffer(blob);
+      }
+    }
+  };
+
+  const predictImg = async (imageData: ArrayBuffer) => {
     const resizerSession = await ort.InferenceSession.create(
       "./src/models/image_resizer.onnx"
     );
@@ -116,19 +127,22 @@ const App: Component = () => {
 
     // console.log(predictedWidth);
 
-    // Encoder output
+    // Run encoder
     const res = await encSession.run({
       input: new ort.Tensor("float32", norm, [1, 1, 64, 128]),
     });
 
-    const out = [[1n]];
+    // Prepare decoder input
+    const out = [1n];
     const mask = [true];
+    // Run decoder token by token
     for (let i = 0; i < config.max_seq_len; i++) {
       const decRes = await decSession.run({
-        x: new ort.Tensor("int64", out.flat(), [1, i + 1]),
+        x: new ort.Tensor("int64", out, [1, i + 1]),
         mask: new ort.Tensor("bool", mask, [1, i + 1]),
         context: new ort.Tensor("float32", res.output.data, res.output.dims),
       });
+      // Get the last token logits
       const decOut = decRes.output.data;
       const logits = decOut.slice(decOut.length - decRes.output.dims[2]);
       const softmaxOut = softmax(logits);
@@ -136,7 +150,7 @@ const App: Component = () => {
       // Select the most probable character
       // TODO: Use random sampling
       const char = softmaxOut.indexOf(Math.max(...softmaxOut));
-      out[0].push(BigInt(char));
+      out.push(BigInt(char));
       mask.push(true);
 
       // Stop if the character is EOS
@@ -146,7 +160,7 @@ const App: Component = () => {
       }
     }
 
-    setPredicted(getOutput(out[0].map((x) => Number(x))));
+    setPredicted(getOutput(out.map((x) => Number(x))));
     setPredictedRender(
       katex.renderToString(predicted(), {
         output: "mathml",
