@@ -1,8 +1,14 @@
-import { Component, onMount } from "solid-js";
+import { Component, createEffect, createSignal, onMount } from "solid-js";
+import katex from "katex";
+import "jimp/browser/lib/jimp";
+const { Jimp } = window as typeof window & { Jimp: any };
 
-import logo from "./logo.svg";
-import styles from "./App.module.css";
-import tokenizer from "./tokenizer";
+// import math from "mathjs";
+// import {} from "ndarray";
+
+import tokenizer from "./models/tokenizer.json";
+import config from "./config";
+import { createDropzone } from "@solid-primitives/upload";
 
 const to_gray = (data: Uint8ClampedArray) => {
   const new_data = new Uint8ClampedArray(data.length / 4);
@@ -57,57 +63,120 @@ const getOutput = (data: number[]) => {
     .trim();
 };
 
-const out = [
-  61, 205, 105, 103, 141, 102, 106, 103, 180, 102, 311, 104, 69, 128, 105, 103,
-  122, 102, 106, 103, 107, 102, 104, 69, 128, 105, 103, 122, 102, 106, 103, 107,
-  102, 104, 69, 150, 105, 103, 122, 102, 106, 103, 107, 102, 104, 139, 128, 105,
-  103, 122, 102, 106, 103, 148, 102, 104, 69, 150, 105, 103, 122, 102, 106, 103,
-  107, 102, 104, 69, 150, 105, 103, 122, 102, 106, 103, 148, 102, 104, 327, 104,
-  327, 104, 327, 104, 327, 104, 327, 2,
-];
-
 const App: Component = () => {
-  const img = <img src="/src/HAbJw.png" />;
+  const [predicted, setPredicted] = createSignal("");
+  const [preditecRender, setPredictedRender] = createSignal("");
 
-  onMount(async () => {
-    // const session = await ort.InferenceSession.create("./src/model.onnx");
-
-    // const dataA = new Float32Array(new Array(112 * 464).fill(0.1));
-
-    // const input = {
-    //   input_image: new ort.Tensor("float32", dataA, [1, 1, 112, 464]),
-    // };
-
-    // console.log(input);
-
-    // const result = await session.run(input);
-    setTimeout(async () => {
-      const canvas = document.createElement("canvas") as HTMLCanvasElement;
-      canvas.width = 512;
-      canvas.height = 512;
-      const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
-      ctx?.drawImage(img as any, 0, 0, 112, 464);
-      const data = ctx?.getImageData(0, 0, 112, 464).data;
-      console.log(data);
-      const gray = to_gray(data);
-      console.log(gray);
-      const norm = normalize(gray);
-      console.log(norm);
-
-      const session = await ort.InferenceSession.create("./src/model.onnx");
-
-      const input = {
-        input_image: new ort.Tensor("float32", norm, [1, 1, 112, 464]),
+  const { setRef: dropzoneRef, files: droppedFiles } = createDropzone({
+    onDrop: async (files: any) => {
+      const reader = new FileReader();
+      reader.onload = async (e: any) => {
+        predictImg(e.target.result);
       };
-
-      const result = await session.run(input);
-      console.log(result);
-
-      console.log(getOutput(out));
-    }, 1000);
+      files.forEach((file: any) => {
+        reader.readAsArrayBuffer(file.file);
+      });
+    },
   });
 
-  return img;
+  const predictImg = async (imageData: Uint8Array) => {
+    const resizerSession = await ort.InferenceSession.create(
+      "./src/models/image_resizer.onnx"
+    );
+
+    const encSession = await ort.InferenceSession.create(
+      "./src/models/encoder.onnx"
+    );
+    const decSession = await ort.InferenceSession.create(
+      "./src/models/decoder.onnx"
+    );
+    // const canvas = document.createElement("canvas") as HTMLCanvasElement;
+    // canvas.width = 250;
+    // canvas.height = 122;
+    // const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
+    // ctx?.drawImage(img as any, 0, 0, 250, 122);
+    // const data = ctx?.getImageData(0, 0, 250, 122).data;
+    // console.log(data);
+    // const gray = to_gray(data);
+    // console.log(gray);
+    // const norm = normalize(gray);
+    // console.log(norm);
+
+    const image = await Jimp.read(imageData);
+    image.resize(128, 64);
+    const gray = to_gray(image.bitmap.data);
+    const norm = normalize(gray);
+    // const resizerRes = await resizerSession.run({
+    //   input: new ort.Tensor("float32", norm, [1, 1, 250, 122]),
+    // });
+    // const resizerIndex = resizerRes.output.data.indexOf(
+    //   Math.max(...resizerRes.output.data)
+    // );
+    // const predictedWidth = (resizerIndex + 1) * 32;
+
+    // console.log(predictedWidth);
+
+    // Encoder output
+    const res = await encSession.run({
+      input: new ort.Tensor("float32", norm, [1, 1, 64, 128]),
+    });
+
+    const out = [[1n]];
+    const mask = [true];
+    for (let i = 0; i < config.max_seq_len; i++) {
+      const decRes = await decSession.run({
+        x: new ort.Tensor("int64", out.flat(), [1, i + 1]),
+        mask: new ort.Tensor("bool", mask, [1, i + 1]),
+        context: new ort.Tensor("float32", res.output.data, res.output.dims),
+      });
+      const decOut = decRes.output.data;
+      const logits = decOut.slice(decOut.length - decRes.output.dims[2]);
+      const softmaxOut = softmax(logits);
+
+      // Select the most probable character
+      // TODO: Use random sampling
+      const char = softmaxOut.indexOf(Math.max(...softmaxOut));
+      out[0].push(BigInt(char));
+      mask.push(true);
+
+      // Stop if the character is EOS
+      // TODO: remove hardcoded value
+      if (char === 2) {
+        break;
+      }
+    }
+
+    setPredicted(getOutput(out[0].map((x) => Number(x))));
+    setPredictedRender(
+      katex.renderToString(predicted(), {
+        output: "mathml",
+      })
+    );
+    console.log(preditecRender());
+  };
+
+  return (
+    <>
+      <div
+        ref={dropzoneRef}
+        style={{ width: "100px", height: "100px", background: "red" }}
+      >
+        Dropzone
+      </div>
+      <div>{predicted()}</div>
+      <div innerHTML={preditecRender()} />
+    </>
+  );
 };
 
 export default App;
+
+function softmax(input: number[]) {
+  // Calculate the maximum value in the input array to avoid numerical instability
+  const maxVal = Math.max(...input);
+  // Calculate the sum of the exponentials of the input array elements
+  const expSum = input.reduce((acc, val) => acc + Math.exp(val - maxVal), 0);
+  // Apply the softmax transformation to each element of the input array
+  const softmaxOutput = input.map((val) => Math.exp(val - maxVal) / expSum);
+  return softmaxOutput;
+}

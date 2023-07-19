@@ -15,6 +15,13 @@
     "vite-plugin-solid": "^2.3.0"
   },
   "dependencies": {
+    "@solid-primitives/upload": "^0.0.113",
+    "@types/katex": "^0.16.1",
+    "@types/ndarray": "^1.0.11",
+    "jimp": "^0.22.8",
+    "katex": "^0.16.8",
+    "mathjs": "^11.9.0",
+    "ndarray": "^1.0.19",
     "onnxruntime-web": "^1.13.1",
     "solid-js": "^1.5.1"
   }
