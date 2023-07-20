@@ -32,6 +32,11 @@ const App: Component = () => {
   let resultArea!: HTMLTextAreaElement;
 
   createEffect(async () => {
+    if (!caches) {
+      setStatus("Seems you are not on HTTPS, try to reload the page.");
+      return;
+    }
+
     setStatus("Downloading resizer model (38MB)");
     const resizerModel = await getData("./image_resizer.onnx");
     setStatus("Downloading encoder model (87MB)");
@@ -315,7 +320,7 @@ const App: Component = () => {
           </div>
         </Show>
       </div>
-      <Show when={loaded()}>
+      <div class={loaded() ? "" : "hidden"}>
         <div class="mb-2">{fileInput}</div>
         <div
           ref={dropzoneRef}
@@ -336,7 +341,7 @@ const App: Component = () => {
         </button>
         <div class="font-semibold">Preview</div>
         <div class="text-xl" innerHTML={predictedRender()} />
-      </Show>
+      </div>
     </div>
   );
 };
