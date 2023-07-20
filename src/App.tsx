@@ -11,6 +11,7 @@ import {
   encode,
   normalize,
   postProcess,
+  predictWidth,
   softmax,
   toGray,
 } from "./utils";
@@ -93,7 +94,7 @@ const App: Component = () => {
 
   const predictImg = async (imageData: ArrayBuffer) => {
     setRunning(true);
-    setStatus("Resizing image");
+    setStatus("Resizing image ");
     let image;
     try {
       image = await Jimp.read(imageData);
@@ -102,7 +103,8 @@ const App: Component = () => {
       setStatus("Error: Invalid image. Ready");
       return;
     }
-    console.log(image);
+
+    // Resize image to fit model input
     image.background(0xffffffff);
     if (image.bitmap.width > config.max_width) {
       image.resize(config.max_width, Jimp.AUTO);
@@ -110,47 +112,59 @@ const App: Component = () => {
     if (image.bitmap.height > config.max_height) {
       image.resize(Jimp.AUTO, config.max_height);
     }
-    // image.contain(
-    //   config.max_width,
-    //   config.max_height,
-    //   Jimp.HORIZONTAL_ALIGN_LEFT | Jimp.VERTICAL_ALIGN_TOP
-    // );
-    //image.resize(128, 64);
+
+    // Contain to x32 size
+    image.contain(
+      Math.ceil(image.bitmap.width / 32) * 32,
+      Math.ceil(image.bitmap.height / 32) * 32,
+      Jimp.HORIZONTAL_ALIGN_LEFT | Jimp.VERTICAL_ALIGN_TOP
+    );
+
+    // Run resizer to find optimal width
     let width = image.bitmap.width;
     let height = image.bitmap.height;
     for (let i = 0; i < 10; i++) {
+      setStatus(status() + ".");
       const gray = toGray(image.bitmap.data);
       const norm = normalize(gray);
-      const resizerRes = await (sessions as any).resizerSession.run({
-        input: new ort.Tensor("float32", norm, [1, 1, height, width]),
-      });
-      const resizerIndex = resizerRes.output.data.indexOf(
-        Math.max(...resizerRes.output.data)
-      );
-      const predictedWidth = (resizerIndex + 1) * 32;
+      let predictedWidth: any;
+      try {
+        predictedWidth = await predictWidth(
+          sessions.resizerSession,
+          norm,
+          width,
+          height
+        );
+      } catch (e) {
+        stopCalculations();
+        setStatus("Error: Resizer error. Try again");
+        return;
+      }
 
+      // Stop if the predicted width is bigger than the original (or the same)
       if (predictedWidth >= width) {
         break;
       }
 
+      // Calculate height based on the predicted width (~ keep aspect ratio)
       const predictedHeight = Math.max(
         Math.round(
           ((predictedWidth / image.bitmap.width) * image.bitmap.height) / 32
         ) * 32,
         32
       );
-      console.log(predictedWidth, predictedHeight);
-      image.resize(
-        predictedWidth,
-        predictedHeight
-        // Jimp.HORIZONTAL_ALIGN_LEFT | Jimp.VERTICAL_ALIGN_TOP
-      );
+
+      // Resize image
+      image.resize(predictedWidth, predictedHeight);
       width = predictedWidth;
       height = predictedHeight;
+
+      if (cancel()) {
+        stopCalculations();
+        return;
+      }
     }
-    image.getBase64("image/png", (a: any, b: any) => {
-      console.log(a, b);
-    });
+
     const gray = toGray(image.bitmap.data);
     const norm = normalize(gray);
 
@@ -160,7 +174,7 @@ const App: Component = () => {
     }
 
     // Run encoder
-    setStatus("Running encoder");
+    setStatus("Running encoder ");
     let res;
     try {
       res = await encode(sessions.encSession, norm, width, height);
@@ -178,6 +192,7 @@ const App: Component = () => {
     // Prepare decoder input
     const out = [BigInt(config.bos_token)];
     const mask = [true];
+
     // Run decoder token by token
     setStatus("Running decoder ");
     for (let i = 0; i < config.max_seq_len; i++) {
@@ -196,7 +211,7 @@ const App: Component = () => {
       const softmaxOut = softmax(logits);
 
       // Select the most probable character
-      // TODO: Use random sampling
+      // TODO: Don't use greedy algorithm
       const char = softmaxOut.indexOf(Math.max(...softmaxOut));
       out.push(BigInt(char));
       mask.push(true);

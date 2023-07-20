@@ -149,3 +149,31 @@ export const decode = (session: any, out: any, mask: any, context: any) => {
     }, 0);
   });
 };
+
+/**
+ * Predict correct width of the image for encoder model
+ * @param session Resizer model session
+ * @param input Input image
+ * @param width Image width
+ * @param height Image height
+ * @returns Predicted width
+ */
+export const predictWidth = (
+  session: any,
+  input: any,
+  width: number,
+  height: number
+) => {
+  return new Promise((resolve, reject) => {
+    setTimeout(async () => {
+      const resizerRes = await session.run({
+        input: new ort.Tensor("float32", input, [1, 1, height, width]),
+      });
+      const resizerIndex = resizerRes.output.data.indexOf(
+        Math.max(...resizerRes.output.data)
+      );
+      const predictedWidth = (resizerIndex + 1) * 32;
+      resolve(predictedWidth);
+    }, 0);
+  });
+};
