@@ -30,11 +30,13 @@ const App: Component = () => {
   let resultArea!: HTMLTextAreaElement;
 
   createEffect(async () => {
-    setStatus("Loading models");
+    setStatus("Loading resizer model");
     const resizerSession = await ort.InferenceSession.create(
       "./image_resizer.onnx"
     );
+    setStatus("Loading encoder model");
     const encSession = await ort.InferenceSession.create("./encoder.onnx");
+    setStatus("Loading decoder model");
     const decSession = await ort.InferenceSession.create("./decoder.onnx");
     setSessions({
       resizerSession,
