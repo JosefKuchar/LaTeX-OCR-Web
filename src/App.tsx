@@ -9,6 +9,7 @@ import {
   decode,
   detokenize,
   encode,
+  getData,
   normalize,
   postProcess,
   predictWidth,
@@ -18,10 +19,11 @@ import {
 
 const App: Component = () => {
   const [predicted, setPredicted] = createSignal("");
-  const [preditecRender, setPredictedRender] = createSignal("");
+  const [predictedRender, setPredictedRender] = createSignal("");
   const [status, setStatus] = createSignal("");
   const [running, setRunning] = createSignal(false);
   const [cancel, setCancel] = createSignal(false);
+  const [loaded, setLoaded] = createSignal(false);
   const [sessions, setSessions] = createStore({
     resizerSession: null,
     encSession: null,
@@ -30,20 +32,25 @@ const App: Component = () => {
   let resultArea!: HTMLTextAreaElement;
 
   createEffect(async () => {
+    setStatus("Downloading resizer model (38MB)");
+    const resizerModel = await getData("./image_resizer.onnx");
+    setStatus("Downloading encoder model (87MB)");
+    const encModel = await getData("./encoder.onnx");
+    setStatus("Downloading decoder model (50MB)");
+    const decModel = await getData("./decoder.onnx");
     setStatus("Loading resizer model");
-    const resizerSession = await ort.InferenceSession.create(
-      "./image_resizer.onnx"
-    );
+    const resizerSession = await ort.InferenceSession.create(resizerModel);
     setStatus("Loading encoder model");
-    const encSession = await ort.InferenceSession.create("./encoder.onnx");
+    const encSession = await ort.InferenceSession.create(encModel);
     setStatus("Loading decoder model");
-    const decSession = await ort.InferenceSession.create("./decoder.onnx");
+    const decSession = await ort.InferenceSession.create(decModel);
     setSessions({
       resizerSession,
       encSession,
       decSession,
     });
     setStatus("Ready");
+    setLoaded(true);
   });
 
   const handleFileSelect = async (event: any) => {
@@ -52,7 +59,9 @@ const App: Component = () => {
     reader.onload = async (e: any) => {
       predictImg(e.target.result);
     };
-    reader.readAsArrayBuffer(files[0]);
+    if (files.length > 0) {
+      reader.readAsArrayBuffer(files[0]);
+    }
   };
 
   const fileInput = (
@@ -72,18 +81,20 @@ const App: Component = () => {
   });
 
   document.onpaste = function (event) {
-    var items = (
-      event.clipboardData || (event as any).originalEvent.clipboardData
-    ).items;
-    for (const index in items) {
-      var item = items[index];
-      if (item.kind === "file") {
-        var blob = item.getAsFile();
-        var reader = new FileReader();
-        reader.onload = function (event) {
-          predictImg(event.target?.result as any);
-        };
-        reader.readAsArrayBuffer(blob);
+    if (loaded()) {
+      var items = (
+        event.clipboardData || (event as any).originalEvent.clipboardData
+      ).items;
+      for (const index in items) {
+        var item = items[index];
+        if (item.kind === "file") {
+          var blob = item.getAsFile();
+          var reader = new FileReader();
+          reader.onload = function (event) {
+            predictImg(event.target?.result as any);
+          };
+          reader.readAsArrayBuffer(blob);
+        }
       }
     }
   };
@@ -233,11 +244,16 @@ const App: Component = () => {
     const postProcessed = postProcess(text);
 
     setPredicted(postProcessed);
-    setPredictedRender(
-      katex.renderToString(postProcessed, {
+    try {
+      const rendered = katex.renderToString(postProcessed, {
         output: "mathml",
-      })
-    );
+      });
+      setPredictedRender(rendered);
+    } catch {
+      setPredictedRender(
+        "Unable to render preview. Output is malformed, you may be able to fix it manually."
+      );
+    }
     resultArea.select();
     resultArea.setSelectionRange(0, 99999);
     stopCalculations();
@@ -299,26 +315,28 @@ const App: Component = () => {
           </div>
         </Show>
       </div>
-      <div class="mb-2">{fileInput}</div>
-      <div
-        ref={dropzoneRef}
-        class="rounded border w-full h-20 p-2 text-center cursor-pointer hover:bg-slate-700 mb-2"
-        onClick={() => (fileInput as any).click()}
-      >
-        Drop image here (or click to select)
-      </div>
-      <div class="font-semibold">Result</div>
-      <textarea class="w-full bg-slate-900 border rounded" ref={resultArea}>
-        {predicted()}
-      </textarea>
-      <button
-        class="border px-2 py-1 hover:bg-slate-700 mb-2 rounded"
-        onClick={handleCopy}
-      >
-        Copy
-      </button>
-      <div class="font-semibold">Preview</div>
-      <div class="text-xl" innerHTML={preditecRender()} />
+      <Show when={loaded()}>
+        <div class="mb-2">{fileInput}</div>
+        <div
+          ref={dropzoneRef}
+          class="rounded border w-full h-20 p-2 text-center cursor-pointer hover:bg-slate-700 mb-2"
+          onClick={() => (fileInput as any).click()}
+        >
+          Drop image here (or click to select)
+        </div>
+        <div class="font-semibold">Result</div>
+        <textarea class="w-full bg-slate-900 border rounded" ref={resultArea}>
+          {predicted()}
+        </textarea>
+        <button
+          class="border px-2 py-1 hover:bg-slate-700 mb-2 rounded"
+          onClick={handleCopy}
+        >
+          Copy
+        </button>
+        <div class="font-semibold">Preview</div>
+        <div class="text-xl" innerHTML={predictedRender()} />
+      </Show>
     </div>
   );
 };
