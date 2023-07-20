@@ -6,7 +6,7 @@ import tokenizer from "./tokenizer.json";
 import config from "./config";
 import { createDropzone } from "@solid-primitives/upload";
 
-const to_gray = (data: Uint8ClampedArray) => {
+const toGray = (data: Uint8ClampedArray) => {
   const new_data = new Uint8ClampedArray(data.length / 4);
   for (let i = 0; i < data.length; i += 4) {
     new_data[i / 4] = (data[i] + data[i + 1] + data[i + 2]) / 3;
@@ -35,7 +35,12 @@ const normalize = (data: Uint8ClampedArray) => {
   return new_data;
 };
 
-const getOutput = (data: number[]) => {
+/**
+ * Convert tokenized data to string
+ * @param data Tokenized data
+ * @returns String
+ */
+const detokenize = (data: number[]) => {
   let string = "";
 
   for (let i = 0; i < data.length; i++) {
@@ -50,18 +55,52 @@ const getOutput = (data: number[]) => {
   }
 
   return string
-    .replace(/\u0120/g, "")
+    .replace(/\u0120/g, " ")
     .replace("[EOS]", "")
     .replace("[BOS]", "")
     .replace("[PAD]", "")
     .trim();
 };
 
+/**
+ * Remove unnecessary spaces
+ * @param s String to postprocess
+ * @returns Postprocessed string
+ */
+const postProcess = (s: string) => {
+  const textReg = /(\\(operatorname|mathrm|text|mathbf)\s?\*? {.*?})/g;
+  let names = [...s.matchAll(textReg)].map((x) => x[0].replace(" ", ""));
+  s = s.replace(textReg, (match) => (names as any).shift());
+  let news = s;
+  while (true) {
+    s = news;
+    news = s.replace(/(?!\\ )([\W_^\d])\s+?([\W_^\d])/g, "$1$2");
+    news = news.replace(/(?!\\ )([\W_^\d])\s+?([a-zA-Z])/g, "$1$2");
+    news = news.replace(/([a-zA-Z])\s+?([\W_^\d])/g, "$1$2");
+    if (news === s) {
+      break;
+    }
+  }
+  return s;
+};
+
 const App: Component = () => {
   const [predicted, setPredicted] = createSignal("");
   const [preditecRender, setPredictedRender] = createSignal("");
+  let status: any;
 
-  const fileInput = <input type="file" class="hidden" />;
+  const handleFileSelect = async (event: any) => {
+    const files = event.target.files;
+    const reader = new FileReader();
+    reader.onload = async (e: any) => {
+      predictImg(e.target.result);
+    };
+    reader.readAsArrayBuffer(files[0]);
+  };
+
+  const fileInput = (
+    <input type="file" class="hidden" onChange={handleFileSelect} />
+  );
 
   const { setRef: dropzoneRef, files: droppedFiles } = createDropzone({
     onDrop: async (files: any) => {
@@ -112,7 +151,7 @@ const App: Component = () => {
 
     const image = await Jimp.read(imageData);
     image.resize(128, 64);
-    const gray = to_gray(image.bitmap.data);
+    const gray = toGray(image.bitmap.data);
     const norm = normalize(gray);
     // const resizerRes = await resizerSession.run({
     //   input: new ort.Tensor("float32", norm, [1, 1, 250, 122]),
@@ -125,6 +164,9 @@ const App: Component = () => {
     // console.log(predictedWidth);
 
     // Run encoder
+    setTimeout(() => {
+      status.innerText = "Running encoder";
+    }, 0);
     const res = await encSession.run({
       input: new ort.Tensor("float32", norm, [1, 1, 64, 128]),
     });
@@ -133,12 +175,16 @@ const App: Component = () => {
     const out = [1n];
     const mask = [true];
     // Run decoder token by token
+    status.innerText = "Running decoder ";
     for (let i = 0; i < config.max_seq_len; i++) {
       const decRes = await decSession.run({
         x: new ort.Tensor("int64", out, [1, i + 1]),
         mask: new ort.Tensor("bool", mask, [1, i + 1]),
         context: new ort.Tensor("float32", res.output.data, res.output.dims),
       });
+      setTimeout(() => {
+        status.innerText += ".";
+      }, 0);
       // Get the last token logits
       const decOut = decRes.output.data;
       const logits = decOut.slice(decOut.length - decRes.output.dims[2]);
@@ -157,9 +203,12 @@ const App: Component = () => {
       }
     }
 
-    setPredicted(getOutput(out.map((x) => Number(x))));
+    const text = detokenize(out.map((x) => Number(x)));
+    const postProcessed = postProcess(text);
+
+    setPredicted(postProcessed);
     setPredictedRender(
-      katex.renderToString(predicted(), {
+      katex.renderToString(postProcessed, {
         output: "mathml",
       })
     );
@@ -206,6 +255,7 @@ const App: Component = () => {
         Drop image here (or click to select)
       </div>
       {fileInput}
+      <div ref={status} />
       <div>{predicted()}</div>
       <div innerHTML={preditecRender()} />
     </div>
