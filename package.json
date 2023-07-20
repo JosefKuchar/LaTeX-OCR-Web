@@ -24,7 +24,6 @@
     "@types/katex": "^0.16.1",
     "jimp": "^0.22.8",
     "katex": "^0.16.8",
-    "onnxruntime-web": "^1.13.1",
     "solid-js": "^1.5.1"
   }
 }

@@ -1,4 +1,4 @@
-import { Component, createEffect, createSignal, onMount } from "solid-js";
+import { Component, Show, createEffect, createSignal, onMount } from "solid-js";
 import { createStore } from "solid-js/store";
 import katex from "katex";
 import "jimp/browser/lib/jimp";
@@ -19,6 +19,8 @@ const App: Component = () => {
   const [predicted, setPredicted] = createSignal("");
   const [preditecRender, setPredictedRender] = createSignal("");
   const [status, setStatus] = createSignal("");
+  const [running, setRunning] = createSignal(false);
+  const [cancel, setCancel] = createSignal(false);
   const [sessions, setSessions] = createStore({
     resizerSession: null,
     encSession: null,
@@ -83,22 +85,23 @@ const App: Component = () => {
     }
   };
 
+  const stopCalculations = () => {
+    setRunning(false);
+    setCancel(false);
+    setStatus("Ready");
+  };
+
   const predictImg = async (imageData: ArrayBuffer) => {
+    setRunning(true);
     setStatus("Resizing image");
-
-    // const canvas = document.createElement("canvas") as HTMLCanvasElement;
-    // canvas.width = 250;
-    // canvas.height = 122;
-    // const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
-    // ctx?.drawImage(img as any, 0, 0, 250, 122);
-    // const data = ctx?.getImageData(0, 0, 250, 122).data;
-    // console.log(data);
-    // const gray = to_gray(data);
-    // console.log(gray);
-    // const norm = normalize(gray);
-    // console.log(norm);
-
-    const image = await Jimp.read(imageData);
+    let image;
+    try {
+      image = await Jimp.read(imageData);
+    } catch (e) {
+      stopCalculations();
+      setStatus("Error: Invalid image. Ready");
+      return;
+    }
     image.resize(128, 64);
     const gray = toGray(image.bitmap.data);
     const norm = normalize(gray);
@@ -112,18 +115,42 @@ const App: Component = () => {
 
     // console.log(predictedWidth);
 
+    if (cancel()) {
+      stopCalculations();
+      return;
+    }
+
     // Run encoder
     setStatus("Running encoder");
-    const res: any = await encode(sessions.encSession, norm);
+    let res;
+    try {
+      res = await encode(sessions.encSession, norm);
+    } catch (e) {
+      stopCalculations();
+      setStatus("Error: Encoder error. Try again");
+      return;
+    }
+
+    if (cancel()) {
+      stopCalculations();
+      return;
+    }
 
     // Prepare decoder input
-    const out = [1n];
+    const out = [BigInt(config.bos_token)];
     const mask = [true];
     // Run decoder token by token
     setStatus("Running decoder ");
     for (let i = 0; i < config.max_seq_len; i++) {
       setStatus(status() + ".");
-      const decRes: any = await decode(sessions.decSession, out, mask, res);
+      let decRes: any;
+      try {
+        decRes = await decode(sessions.decSession, out, mask, res);
+      } catch (e) {
+        stopCalculations();
+        setStatus("Error: Decoder error. Try again");
+        return;
+      }
       // Get the last token logits
       const decOut = decRes.output.data;
       const logits = decOut.slice(decOut.length - decRes.output.dims[2]);
@@ -136,9 +163,13 @@ const App: Component = () => {
       mask.push(true);
 
       // Stop if the character is EOS
-      // TODO: remove hardcoded value
-      if (char === 2) {
+      if (char === config.eos_token) {
         break;
+      }
+
+      if (cancel()) {
+        stopCalculations();
+        return;
       }
     }
 
@@ -153,6 +184,7 @@ const App: Component = () => {
     );
     resultArea.select();
     resultArea.setSelectionRange(0, 99999);
+    stopCalculations();
   };
 
   const handleCopy = () => {
@@ -194,8 +226,22 @@ const App: Component = () => {
         <div>💡 You can directly paste image from clipboard</div>
         <div>⚠️ Work in progress</div>
       </div>
-      <div>
-        <span class="font-semibold mb-2">Status:</span> {status()}
+      <div class="flex items-center">
+        <div>
+          <span class="font-semibold mb-2">Status:</span> {status()}
+        </div>
+        <Show when={running()}>
+          <div class="ml-auto">
+            <button
+              class="border px-2 py-1 hover:bg-slate-700 mb-2 rounded"
+              onClick={() => {
+                setCancel(true);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </Show>
       </div>
       <div class="mb-2">{fileInput}</div>
       <div
