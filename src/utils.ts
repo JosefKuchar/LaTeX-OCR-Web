@@ -109,11 +109,16 @@ export const softmax = (input: number[]) => {
  * @param input Input image
  * @returns Encoded image context
  */
-export const encode = (session: any, input: any) => {
+export const encode = (
+  session: any,
+  input: any,
+  width: number,
+  height: number
+) => {
   return new Promise((resolve, reject) => {
     setTimeout(async () => {
       const res = await session.run({
-        input: new ort.Tensor("float32", input, [1, 1, 64, 128]),
+        input: new ort.Tensor("float32", input, [1, 1, height, width]),
       });
       resolve(res);
     }, 0);

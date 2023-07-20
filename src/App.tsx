@@ -102,18 +102,57 @@ const App: Component = () => {
       setStatus("Error: Invalid image. Ready");
       return;
     }
-    image.resize(128, 64);
+    console.log(image);
+    image.background(0xffffffff);
+    if (image.bitmap.width > config.max_width) {
+      image.resize(config.max_width, Jimp.AUTO);
+    }
+    if (image.bitmap.height > config.max_height) {
+      image.resize(Jimp.AUTO, config.max_height);
+    }
+    // image.contain(
+    //   config.max_width,
+    //   config.max_height,
+    //   Jimp.HORIZONTAL_ALIGN_LEFT | Jimp.VERTICAL_ALIGN_TOP
+    // );
+    //image.resize(128, 64);
+    let width = image.bitmap.width;
+    let height = image.bitmap.height;
+    for (let i = 0; i < 10; i++) {
+      const gray = toGray(image.bitmap.data);
+      const norm = normalize(gray);
+      const resizerRes = await (sessions as any).resizerSession.run({
+        input: new ort.Tensor("float32", norm, [1, 1, height, width]),
+      });
+      const resizerIndex = resizerRes.output.data.indexOf(
+        Math.max(...resizerRes.output.data)
+      );
+      const predictedWidth = (resizerIndex + 1) * 32;
+
+      if (predictedWidth >= width) {
+        break;
+      }
+
+      const predictedHeight = Math.max(
+        Math.round(
+          ((predictedWidth / image.bitmap.width) * image.bitmap.height) / 32
+        ) * 32,
+        32
+      );
+      console.log(predictedWidth, predictedHeight);
+      image.resize(
+        predictedWidth,
+        predictedHeight
+        // Jimp.HORIZONTAL_ALIGN_LEFT | Jimp.VERTICAL_ALIGN_TOP
+      );
+      width = predictedWidth;
+      height = predictedHeight;
+    }
+    image.getBase64("image/png", (a: any, b: any) => {
+      console.log(a, b);
+    });
     const gray = toGray(image.bitmap.data);
     const norm = normalize(gray);
-    // const resizerRes = await resizerSession.run({
-    //   input: new ort.Tensor("float32", norm, [1, 1, 250, 122]),
-    // });
-    // const resizerIndex = resizerRes.output.data.indexOf(
-    //   Math.max(...resizerRes.output.data)
-    // );
-    // const predictedWidth = (resizerIndex + 1) * 32;
-
-    // console.log(predictedWidth);
 
     if (cancel()) {
       stopCalculations();
@@ -124,7 +163,7 @@ const App: Component = () => {
     setStatus("Running encoder");
     let res;
     try {
-      res = await encode(sessions.encSession, norm);
+      res = await encode(sessions.encSession, norm, width, height);
     } catch (e) {
       stopCalculations();
       setStatus("Error: Encoder error. Try again");
