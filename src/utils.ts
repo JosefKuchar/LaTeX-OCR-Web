@@ -102,3 +102,45 @@ export const softmax = (input: number[]) => {
   const softmaxOutput = input.map((val) => Math.exp(val - maxVal) / expSum);
   return softmaxOutput;
 };
+
+/**
+ * Encode the input image using the encoder model
+ * @param session Encoder model session
+ * @param input Input image
+ * @returns Encoded image context
+ */
+export const encode = (session: any, input: any) => {
+  return new Promise((resolve, reject) => {
+    setTimeout(async () => {
+      const res = await session.run({
+        input: new ort.Tensor("float32", input, [1, 1, 64, 128]),
+      });
+      resolve(res);
+    }, 0);
+  });
+};
+
+/**
+ * Decode one token using the decoder model
+ * @param session Decoder model session
+ * @param out Previous decoded tokens
+ * @param mask Mask of the previous decoded tokens
+ * @param context Encoded image context
+ * @returns Decoded token (raw probability distribution)
+ */
+export const decode = (session: any, out: any, mask: any, context: any) => {
+  return new Promise((resolve, reject) => {
+    setTimeout(async () => {
+      const res = await session.run({
+        x: new ort.Tensor("int64", out, [1, out.length]),
+        mask: new ort.Tensor("bool", mask, [1, mask.length]),
+        context: new ort.Tensor(
+          "float32",
+          context.output.data,
+          context.output.dims
+        ),
+      });
+      resolve(res);
+    }, 0);
+  });
+};

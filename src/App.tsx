@@ -4,7 +4,15 @@ import "jimp/browser/lib/jimp";
 const { Jimp } = window as typeof window & { Jimp: any };
 import config from "./config";
 import { createDropzone } from "@solid-primitives/upload";
-import { detokenize, normalize, postProcess, softmax, toGray } from "./utils";
+import {
+  decode,
+  detokenize,
+  encode,
+  normalize,
+  postProcess,
+  softmax,
+  toGray,
+} from "./utils";
 
 const App: Component = () => {
   const [predicted, setPredicted] = createSignal("");
@@ -54,6 +62,8 @@ const App: Component = () => {
   };
 
   const predictImg = async (imageData: ArrayBuffer) => {
+    status.innerText = "Running prediction";
+
     const resizerSession = await ort.InferenceSession.create(
       "./image_resizer.onnx"
     );
@@ -86,12 +96,8 @@ const App: Component = () => {
     // console.log(predictedWidth);
 
     // Run encoder
-    setTimeout(() => {
-      status.innerText = "Running encoder";
-    }, 0);
-    const res = await encSession.run({
-      input: new ort.Tensor("float32", norm, [1, 1, 64, 128]),
-    });
+    status.innerText = "Running encoder";
+    const res: any = await encode(encSession, norm);
 
     // Prepare decoder input
     const out = [1n];
@@ -99,14 +105,8 @@ const App: Component = () => {
     // Run decoder token by token
     status.innerText = "Running decoder ";
     for (let i = 0; i < config.max_seq_len; i++) {
-      const decRes = await decSession.run({
-        x: new ort.Tensor("int64", out, [1, i + 1]),
-        mask: new ort.Tensor("bool", mask, [1, i + 1]),
-        context: new ort.Tensor("float32", res.output.data, res.output.dims),
-      });
-      setTimeout(() => {
-        status.innerText += ".";
-      }, 0);
+      status.innerText += ".";
+      const decRes: any = await decode(decSession, out, mask, res);
       // Get the last token logits
       const decOut = decRes.output.data;
       const logits = decOut.slice(decOut.length - decRes.output.dims[2]);
@@ -167,6 +167,7 @@ const App: Component = () => {
             github.com/RapidAI/RapidLatexOCR
           </a>
         </div>
+        <div>💡 You can directly paste image from clipboard</div>
         <div>⚠️ Work in progress</div>
       </div>
       <div
