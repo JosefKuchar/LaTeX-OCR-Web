@@ -1,4 +1,5 @@
 import { Component, createEffect, createSignal, onMount } from "solid-js";
+import { createStore } from "solid-js/store";
 import katex from "katex";
 import "jimp/browser/lib/jimp";
 const { Jimp } = window as typeof window & { Jimp: any };
@@ -17,7 +18,28 @@ import {
 const App: Component = () => {
   const [predicted, setPredicted] = createSignal("");
   const [preditecRender, setPredictedRender] = createSignal("");
-  let status: any;
+  const [status, setStatus] = createSignal("");
+  const [sessions, setSessions] = createStore({
+    resizerSession: null,
+    encSession: null,
+    decSession: null,
+  });
+  let resultArea!: HTMLTextAreaElement;
+
+  createEffect(async () => {
+    setStatus("Loading models");
+    const resizerSession = await ort.InferenceSession.create(
+      "./image_resizer.onnx"
+    );
+    const encSession = await ort.InferenceSession.create("./encoder.onnx");
+    const decSession = await ort.InferenceSession.create("./decoder.onnx");
+    setSessions({
+      resizerSession,
+      encSession,
+      decSession,
+    });
+    setStatus("Ready");
+  });
 
   const handleFileSelect = async (event: any) => {
     const files = event.target.files;
@@ -62,13 +84,8 @@ const App: Component = () => {
   };
 
   const predictImg = async (imageData: ArrayBuffer) => {
-    status.innerText = "Running prediction";
+    setStatus("Resizing image");
 
-    const resizerSession = await ort.InferenceSession.create(
-      "./image_resizer.onnx"
-    );
-    const encSession = await ort.InferenceSession.create("./encoder.onnx");
-    const decSession = await ort.InferenceSession.create("./decoder.onnx");
     // const canvas = document.createElement("canvas") as HTMLCanvasElement;
     // canvas.width = 250;
     // canvas.height = 122;
@@ -96,17 +113,17 @@ const App: Component = () => {
     // console.log(predictedWidth);
 
     // Run encoder
-    status.innerText = "Running encoder";
-    const res: any = await encode(encSession, norm);
+    setStatus("Running encoder");
+    const res: any = await encode(sessions.encSession, norm);
 
     // Prepare decoder input
     const out = [1n];
     const mask = [true];
     // Run decoder token by token
-    status.innerText = "Running decoder ";
+    setStatus("Running decoder ");
     for (let i = 0; i < config.max_seq_len; i++) {
-      status.innerText += ".";
-      const decRes: any = await decode(decSession, out, mask, res);
+      setStatus(status() + ".");
+      const decRes: any = await decode(sessions.decSession, out, mask, res);
       // Get the last token logits
       const decOut = decRes.output.data;
       const logits = decOut.slice(decOut.length - decRes.output.dims[2]);
@@ -134,7 +151,14 @@ const App: Component = () => {
         output: "mathml",
       })
     );
-    console.log(preditecRender());
+    resultArea.select();
+    resultArea.setSelectionRange(0, 99999);
+  };
+
+  const handleCopy = () => {
+    resultArea.select();
+    resultArea.setSelectionRange(0, 99999);
+    navigator.clipboard.writeText(resultArea.value);
   };
 
   return (
@@ -170,17 +194,29 @@ const App: Component = () => {
         <div>💡 You can directly paste image from clipboard</div>
         <div>⚠️ Work in progress</div>
       </div>
+      <div>
+        <span class="font-semibold mb-2">Status:</span> {status()}
+      </div>
+      <div class="mb-2">{fileInput}</div>
       <div
         ref={dropzoneRef}
-        class="border w-full h-20 p-2 text-center cursor-pointer hover:bg-slate-700"
+        class="rounded border w-full h-20 p-2 text-center cursor-pointer hover:bg-slate-700 mb-2"
         onClick={() => (fileInput as any).click()}
       >
         Drop image here (or click to select)
       </div>
-      {fileInput}
-      <div ref={status} />
-      <div>{predicted()}</div>
-      <div innerHTML={preditecRender()} />
+      <div class="font-semibold">Result</div>
+      <textarea class="w-full bg-slate-900 border rounded" ref={resultArea}>
+        {predicted()}
+      </textarea>
+      <button
+        class="border px-2 py-1 hover:bg-slate-700 mb-2 rounded"
+        onClick={handleCopy}
+      >
+        Copy
+      </button>
+      <div class="font-semibold">Preview</div>
+      <div class="text-xl" innerHTML={preditecRender()} />
     </div>
   );
 };
